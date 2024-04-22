@@ -1,11 +1,10 @@
+from langchain_openai import ChatOpenAI
 import praw
 import time
 import os
 
 from langchain.tools import tool
-from langchain.llms import Ollama
 from crewai import Agent, Task, Process, Crew
-
 
 from langchain.agents import load_tools
 
@@ -13,26 +12,25 @@ from langchain.agents import load_tools
 human_tools = load_tools(["human"])
 
 # To Load GPT-4
-api = os.environ.get("OPENAI_API_KEY")
+# api = os.environ.get("OPENAI_API_KEY")
 
 
-# To Load Local models through Ollama
-mistral = Ollama(model="mistral")
-
+# To Load Local LM Studio models
+lmstudio = ChatOpenAI(base_url="http://localhost:1234/v1", api_key="lm-studio", model="lmstudio-community/Meta-Llama-3-8B-Instruct-GGUF")
 
 class BrowserTool:
     @tool("Scrape reddit content")
     def scrape_reddit(max_comments_per_post=7):
         """Useful to scrape a reddit content"""
         reddit = praw.Reddit(
-            client_id="client-id",
-            client_secret="client-secret",
+            client_id="yz3nPPB1WxEq7BopMVISOA",
+            client_secret="Q-AANk-nPDVGKk5fnkx13URgjoVmbg",
             user_agent="user-agent",
         )
         subreddit = reddit.subreddit("LocalLLaMA")
         scraped_data = []
 
-        for post in subreddit.hot(limit=12):
+        for post in subreddit.hot(limit=5):
             post_data = {"title": post.title, "url": post.url, "comments": []}
 
             try:
@@ -70,7 +68,6 @@ explorer = Agent(
     verbose=True,
     allow_delegation=False,
     tools=[BrowserTool().scrape_reddit] + human_tools,
-    llm=mistral,  # remove to use default gpt-4
 )
 
 writer = Agent(
@@ -81,7 +78,6 @@ writer = Agent(
     fun way by using layman words.ONLY use scraped data from LocalLLama subreddit for the blog.""",
     verbose=True,
     allow_delegation=True,
-    llm=mistral,  # remove to use default gpt-4
 )
 critic = Agent(
     role="Expert Writing Critic",
@@ -92,7 +88,14 @@ critic = Agent(
     """,
     verbose=True,
     allow_delegation=True,
-    llm=mistral,  # remove to use default gpt-4
+)
+# 将英文翻译成中文的agent
+translator = Agent(
+    role="Expert Translator",
+    goal="Translate English text into Chinese text",
+    backstory="""You are an Expert at translating English text into Chinese text. You know how to provide helpful feedback that can improve any text. You know how to make sure that text stays technical and insightful by using layman terms.""",
+    verbose=True,
+    allow_delegation=False,
 )
 
 task_report = Task(
@@ -100,6 +103,13 @@ task_report = Task(
     scraped data from LocalLLama to generate the report. Your final answer MUST be a full analysis report, text only, ignore any code or anything that 
     isn't text. The report has to have bullet points and with 5-10 exciting new AI projects and tools. Write names of every tool and project. 
     Each bullet point MUST contain 3 sentences that refer to one specific ai company, product, model or anything you found on subreddit LocalLLama.  
+    """,
+    expected_output="""## [Title of post](link to project)
+    - Interesting facts
+    - Own thoughts on how it connects to the overall theme of the newsletter
+    ## [Title of second post](link to project)
+    - Interesting facts
+    - Own thoughts on how it connects to the overall theme of the newsletter
     """,
     agent=explorer,
 )
@@ -120,6 +130,13 @@ task_blog = Task(
     - Own thoughts on how it connects to the overall theme of the newsletter
     ```
     """,
+    expected_output="""## [Title of post](link to project)
+    - Interesting facts
+    - Own thoughts on how it connects to the overall theme of the newsletter
+    ## [Title of second post](link to project)
+    - Interesting facts
+    - Own thoughts on how it connects to the overall theme of the newsletter
+    """,
     agent=writer,
 )
 
@@ -135,13 +152,42 @@ task_critique = Task(
     ```
     Make sure that it does and if it doesn't, rewrite it accordingly.
     """,
+    expected_output="""## [Title of post](link to project)
+    - Interesting facts
+    - Own thoughts on how it connects to the overall theme of the newsletter
+    ## [Title of second post](link to project)
+    - Interesting facts
+    - Own thoughts on how it connects to the overall theme of the newsletter
+    """,
     agent=critic,
+)
+
+#翻译任务
+task_translate = Task(
+    description="""Translate the blog article from English to Chinese. The Output MUST have the following markdown format:
+    ```
+    ## [Title of post](link to project)
+    - Interesting facts
+    - Own thoughts on how it connects to the overall theme of the newsletter
+    ## [Title of second post](link to project)
+    - Interesting facts
+    - Own thoughts on how it connects to the overall theme of the newsletter
+    ```
+    """,
+    agent=translator,
+    expected_output="""## [Title of post](link to project)
+    - Interesting facts
+    - Own thoughts on how it connects to the overall theme of the newsletter
+    ## [Title of second post](link to project)
+    - Interesting facts
+    - Own thoughts on how it connects to the overall theme of the newsletter
+    """,
 )
 
 # instantiate crew of agents
 crew = Crew(
-    agents=[explorer, writer, critic],
-    tasks=[task_report, task_blog, task_critique],
+    agents=[explorer, writer, critic, translator],
+    tasks=[task_report, task_blog, task_critique, task_translate],
     verbose=2,
     process=Process.sequential,  # Sequential process will have tasks executed one after the other and the outcome of the previous one is passed as extra content into this next.
 )
